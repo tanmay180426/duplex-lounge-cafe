@@ -7,110 +7,97 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
-  MessageCircle,
   Printer,
-  RefreshCw,
   LogOut,
   Lock,
   Sparkles,
   Phone,
-  Layers,
-  FileText,
   ChevronDown,
   X,
-  CreditCard,
-  Image as ImageIcon,
-  Upload,
-  Trash2,
-  DollarSign,
-  TrendingUp,
-  Store,
   ShieldCheck,
   Eye,
-  Gift,
-  Tv,
-  Heart,
-  HelpCircle,
-  Check,
-  Edit3,
-  SlidersHorizontal,
-  PhoneCall
+  Ban,
+  Hourglass
 } from "lucide-react";
-import { adminSignIn, signOutUser, getCurrentUser } from "../services/authService";
+import { adminSignIn, signOut } from "../services/authService";
 import {
-  subscribeToBookings,
-  updateBookingStatus,
-  formatWhatsAppMessage
+  getAllBookings,
+  cancelBookingByAdmin,
+  getCurrentISTTime
 } from "../services/bookingService";
-import {
-  uploadGalleryImage,
-  deleteGalleryImage,
-  subscribeToGalleryImages
-} from "../services/imageService";
-import { subscribeToPayments } from "../services/paymentService";
 import { printEmailReceipt } from "../services/emailService";
-import { SEATING_AREAS, CAFE_PHYSICAL_TABLES } from "../data/tableData";
-import { getWhatsAppUrl, OWNER_CONFIG } from "../config/ownerConfig";
 
-export default function AdminDashboard({ onExitAdmin, onPreviewEmail }) {
-  // Auth state
-  const [adminUser, setAdminUser] = useState(() => {
-    const user = getCurrentUser();
-    return user?.role === "admin" ? user : null;
-  });
-  const [emailInput, setEmailInput] = useState("admin@duplexcafe.com");
-  const [passwordInput, setPasswordInput] = useState("duplex123");
+const STATUS_LABELS = {
+  pending: { label: "Pending", color: "amber", icon: Hourglass },
+  confirmed: { label: "Confirmed", color: "emerald", icon: CheckCircle2 },
+  cancelled: { label: "Cancelled", color: "red", icon: XCircle },
+  rejected: { label: "Rejected", color: "red", icon: Ban }
+};
+
+function StatusBadge({ status }) {
+  const key = (status || "pending").toLowerCase();
+  const cfg = STATUS_LABELS[key] || STATUS_LABELS.pending;
+  const Icon = cfg.icon;
+  const palette = {
+    amber: "bg-amber-950/60 text-amber-300 border-amber-500/40",
+    emerald: "bg-emerald-950/60 text-emerald-400 border-emerald-500/40",
+    red: "bg-red-950/60 text-red-400 border-red-500/40"
+  };
+  return (
+    <span
+      className={`px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 w-max ${palette[cfg.color]}`}
+    >
+      <Icon className="w-3 h-3" />
+      <span>{cfg.label}</span>
+    </span>
+  );
+}
+
+export default function AdminDashboard({ onExitAdmin }) {
+  const [adminUser, setAdminUser] = useState(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
   const [authError, setAuthError] = useState("");
   const [isAuthLoading, setIsAuthLoading] = useState(false);
 
-  // Authority Admin Tabs: "bookings" | "schedule" | "tables" | "requests" | "payments" | "media"
-  const [activeTab, setActiveTab] = useState("bookings");
-
-  // Data states
   const [bookings, setBookings] = useState([]);
-  const [payments, setPayments] = useState([]);
-  const [galleryImages, setGalleryImages] = useState([]);
-  const [tableStates, setTableStates] = useState(CAFE_PHYSICAL_TABLES);
+  const [isLoadingBookings, setIsLoadingBookings] = useState(true);
 
-  // Filter states
-  const [dateFilter, setDateFilter] = useState("TODAY"); // "TODAY" | "TOMORROW" | "ALL" | custom YYYY-MM-DD
+  const [dateFilter, setDateFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [paymentFilter, setPaymentFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Inspection Drawer
   const [selectedBooking, setSelectedBooking] = useState(null);
-  const [editNotes, setEditNotes] = useState("");
 
-  // Media upload state
-  const [uploadFile, setUploadFile] = useState(null);
-  const [uploadPreview, setUploadPreview] = useState(null);
-  const [uploadTitle, setUploadTitle] = useState("");
-  const [uploadCategory, setUploadCategory] = useState("ambience");
-  const [uploadCaption, setUploadCaption] = useState("");
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState("");
+  // Action modals
+  const [cancelModalBooking, setCancelModalBooking] = useState(null);
+  const [cancelReason, setCancelReason] = useState("Customer requested cancellation");
+  const [isCancelling, setIsCancelling] = useState(false);
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const [actionBusyId, setActionBusyId] = useState(null);
+  const [toast, setToast] = useState(null);
 
-  // Subscriptions
+  const { todayDateString } = getCurrentISTTime();
+  const tomorrowObj = new Date(Date.now() + 86400000);
+  const tomorrowStr = tomorrowObj.toISOString().split("T")[0];
+
   useEffect(() => {
     if (!adminUser) return;
-
-    const unsubBookings = subscribeToBookings((data) => setBookings(data));
-    const unsubPayments = subscribeToPayments((data) => setPayments(data));
-    const unsubImages = subscribeToGalleryImages((data) => setGalleryImages(data));
-
+    setIsLoadingBookings(true);
+    const unsub = getAllBookings((data) => {
+      setBookings(data);
+      setIsLoadingBookings(false);
+    });
     return () => {
-      if (unsubBookings) unsubBookings();
-      if (unsubPayments) unsubPayments();
-      if (unsubImages) unsubImages();
+      if (unsub) unsub();
     };
   }, [adminUser]);
 
-  // Handle Admin Login
+  const showToast = (message, kind = "info") => {
+    setToast({ message, kind });
+    setTimeout(() => setToast(null), 3200);
+  };
+
   const handleLogin = async (e) => {
     e?.preventDefault();
     setAuthError("");
@@ -126,187 +113,100 @@ export default function AdminDashboard({ onExitAdmin, onPreviewEmail }) {
   };
 
   const handleLogout = async () => {
-    await signOutUser();
+    await signOut();
     setAdminUser(null);
   };
 
-  // Authority Action: Change Status & Notes
-  const handleAdminStatusAction = async (bookingId, newStatus, customNote = null) => {
-    await updateBookingStatus(bookingId, newStatus, customNote);
-    if (selectedBooking && (selectedBooking.id === bookingId || selectedBooking.bookingId === bookingId)) {
-      setSelectedBooking((prev) => ({
-        ...prev,
-        status: newStatus,
-        adminNotes: customNote !== null ? customNote : prev.adminNotes
-      }));
-    }
-  };
-
-  // Authority Action: Reassign Seating Area
-  const handleReassignArea = async (bookingId, newAreaId) => {
-    const areaObj = SEATING_AREAS.find((a) => a.id === newAreaId);
-    if (!areaObj) return;
-    await updateBookingStatus(bookingId, selectedBooking.status, `Reassigned table area to ${areaObj.name}`);
-    alert(`Reservation reassigned to ${areaObj.name}`);
-  };
-
-  // Authority Action: Toggle Physical Table Status
-  const handleToggleTableStatus = (tableId, nextStatus) => {
-    setTableStates((prev) =>
-      prev.map((t) => (t.id === tableId ? { ...t, status: nextStatus } : t))
-    );
-  };
-
-  // Image Upload handler
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setUploadFile(file);
-      setUploadTitle(file.name.replace(/\.[^/.]+$/, ""));
-      const reader = new FileReader();
-      reader.onload = () => setUploadPreview(reader.result);
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleUploadImage = async (e) => {
-    e?.preventDefault();
-    if (!uploadFile) return;
-    setIsUploading(true);
-    setUploadMsg("");
-    setUploadProgress(10);
-
+  const handleCancel = async () => {
+    if (!cancelModalBooking) return;
+    const id = cancelModalBooking.bookingId || cancelModalBooking.id;
+    setIsCancelling(true);
     try {
-      await uploadGalleryImage({
-        file: uploadFile,
-        title: uploadTitle || "Duplex Cafe",
-        category: uploadCategory,
-        caption: uploadCaption,
-        onProgress: (p) => setUploadProgress(p)
-      });
-      setIsUploading(false);
-      setUploadMsg("✓ Image uploaded successfully to website gallery!");
-      setUploadFile(null);
-      setUploadPreview(null);
-      setUploadTitle("");
-      setUploadCaption("");
-      setUploadProgress(0);
+      await cancelBookingByAdmin(id, cancelReason);
+      setIsCancelling(false);
+      setCancelModalBooking(null);
+      showToast(`Booking #${id} cancelled.`, "success");
+      if (selectedBooking && (selectedBooking.id === id || selectedBooking.bookingId === id)) {
+        setSelectedBooking((prev) => ({ ...prev, status: "cancelled", cancellationReason: cancelReason }));
+      }
     } catch (err) {
-      setIsUploading(false);
-      setUploadMsg(`Error: ${err.message}`);
+      setIsCancelling(false);
+      showToast(`Cancel failed: ${err.message}`, "error");
     }
   };
 
-  const handleDeleteImage = async (imgId, storagePath) => {
-    if (window.confirm("Delete this image from gallery?")) {
-      await deleteGalleryImage(imgId, storagePath);
-    }
-  };
-
-  // Filtered Bookings for the manager
   const filteredBookings = useMemo(() => {
     return bookings.filter((b) => {
-      // Date filter
+      const bookingDate = b.date || b.reservation?.date;
+      const bookingStatus = (b.status || "pending").toLowerCase();
+
       let matchDate = true;
-      if (dateFilter === "TODAY") {
-        matchDate = b.reservation?.date === todayStr;
-      } else if (dateFilter === "TOMORROW") {
-        matchDate = b.reservation?.date === tomorrowStr;
-      } else if (dateFilter !== "ALL") {
-        matchDate = b.reservation?.date === dateFilter;
-      }
+      if (dateFilter === "TODAY") matchDate = bookingDate === todayDateString;
+      else if (dateFilter === "TOMORROW") matchDate = bookingDate === tomorrowStr;
+      else if (dateFilter !== "ALL") matchDate = bookingDate === dateFilter;
 
-      // Status filter
-      const matchStatus = statusFilter === "ALL" || b.status === statusFilter;
+      const matchStatus = statusFilter === "ALL" ? true : bookingStatus === statusFilter.toLowerCase();
 
-      // Payment filter
-      const matchPayment =
-        paymentFilter === "ALL" ||
-        (paymentFilter === "PAID" && b.payment?.status === "PAID") ||
-        (paymentFilter === "COUNTER" && b.payment?.status !== "PAID");
+      const bId = (b.bookingId || b.id || "").toLowerCase();
+      const cName = (b.name || b.customer?.name || "").toLowerCase();
+      const cPhone = (b.phone || b.customer?.phone || "");
+      const cEmail = (b.email || b.customer?.email || "").toLowerCase();
+      const notes = (b.specialRequests || b.reservation?.specialRequests || "").toLowerCase();
 
-      // Search filter
+      const q = searchQuery.toLowerCase().trim();
       const matchSearch =
-        !searchQuery ||
-        b.bookingId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        b.customer?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        b.customer?.phone?.includes(searchQuery) ||
-        b.reservation?.specialRequests?.toLowerCase().includes(searchQuery.toLowerCase());
+        !q ||
+        bId.includes(q) ||
+        cName.includes(q) ||
+        cPhone.includes(q) ||
+        cEmail.includes(q) ||
+        notes.includes(q);
 
-      return matchDate && matchStatus && matchPayment && matchSearch;
+      return matchDate && matchStatus && matchSearch;
     });
-  }, [bookings, dateFilter, statusFilter, paymentFilter, searchQuery, todayStr, tomorrowStr]);
+  }, [bookings, dateFilter, statusFilter, searchQuery, todayDateString, tomorrowStr]);
 
-  // Special Requests List
-  const specialRequestsList = useMemo(() => {
-    return bookings.filter(
-      (b) =>
-        (b.reservation?.specialRequests && b.reservation.specialRequests.trim().length > 0) ||
-        (b.reservation?.occasion && b.reservation.occasion !== "Casual Hangout")
-    );
-  }, [bookings]);
-
-  // Key KPI metrics
   const metrics = useMemo(() => {
-    const todayBookings = bookings.filter((b) => b.reservation?.date === todayStr);
-    const activeConfirmed = bookings.filter((b) => ["CONFIRMED", "SEATED"].includes(b.status));
-    const pendingAction = bookings.filter((b) => b.status === "PENDING");
-    
-    const paidOnlineTotal = bookings.reduce((sum, b) => {
-      return b.payment?.status === "PAID" ? sum + (b.payment?.amount || b.preOrder?.totalBill || 0) : sum;
-    }, 0);
+    const total = bookings.length;
+    const pending = bookings.filter((b) => (b.status || "").toLowerCase() === "pending").length;
+    const confirmed = bookings.filter((b) => (b.status || "").toLowerCase() === "confirmed").length;
+    const cancelled = bookings.filter(
+      (b) => (b.status || "").toLowerCase() === "cancelled" || (b.status || "").toLowerCase() === "rejected"
+    ).length;
+    const todayCount = bookings.filter((b) => (b.date || b.reservation?.date) === todayDateString).length;
+    return { total, pending, confirmed, cancelled, todayCount };
+  }, [bookings, todayDateString]);
 
-    const pendingCounterTotal = bookings.reduce((sum, b) => {
-      return b.payment?.status !== "PAID" && b.status !== "CANCELLED"
-        ? sum + (b.preOrder?.totalBill || 0)
-        : sum;
-    }, 0);
-
-    return {
-      todayCount: todayBookings.length,
-      activeCount: activeConfirmed.length,
-      pendingCount: pendingAction.length,
-      paidOnlineTotal,
-      pendingCounterTotal,
-      specialReqCount: specialRequestsList.length
-    };
-  }, [bookings, todayStr, specialRequestsList]);
-
-  // IF NOT AUTHENTICATED AS ADMIN: SHOW ADMIN LOGIN SCREEN
+  // ---------------- LOGIN VIEW ----------------
   if (!adminUser) {
     return (
-      <div className="min-h-screen bg-background-darker flex flex-col items-center justify-center p-4 selection:bg-coffee-500 selection:text-background-darker font-sans">
-        <div className="w-full max-w-md bg-background-card border border-white/15 rounded-sm p-8 shadow-2xl shadow-black relative">
-          
-          <button
-            onClick={onExitAdmin}
-            className="absolute top-4 right-4 p-2 text-muted hover:text-cream-100 rounded-sm"
-          >
-            <X className="w-5 h-5" />
-          </button>
+      <div className="min-h-screen bg-background-darker text-cream-100 flex items-center justify-center p-4 font-sans relative overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-coffee-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-coffee-400/10 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="text-center mb-8">
-            <div className="w-12 h-12 rounded-full border border-coffee-400 bg-coffee-500/10 flex items-center justify-center mx-auto mb-3 text-coffee-300">
+        <div className="w-full max-w-md bg-background-card border border-white/10 rounded-sm shadow-2xl p-8 space-y-6 relative z-10">
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full border border-coffee-400 bg-coffee-500/10 text-coffee-300 flex items-center justify-center mx-auto shadow-lg">
               <ShieldCheck className="w-6 h-6" />
             </div>
-            <h2 className="font-serif text-2xl text-cream-100 uppercase tracking-widest">
-              DLC Admin Authority
+            <h2 className="font-serif text-2xl text-cream-100 uppercase tracking-wider">
+              Cafe Administrator
             </h2>
-            <p className="text-xs text-muted mt-1 font-light">
-              Management & Operations Portal
+            <p className="text-xs text-muted">
+              Duplex Lounge Cafe • Protected Staff Portal
             </p>
           </div>
 
           {authError && (
-            <div className="mb-6 p-3.5 rounded-sm bg-red-950/40 border border-red-500/40 text-red-300 text-xs flex items-center gap-2">
+            <div className="p-3 bg-red-950/40 border border-red-500/40 rounded-sm text-xs text-red-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{authError}</span>
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-4 text-xs">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-light mb-1">
+              <label className="block text-muted-light uppercase font-semibold tracking-wider mb-1.5">
                 Admin Email
               </label>
               <input
@@ -314,977 +214,447 @@ export default function AdminDashboard({ onExitAdmin, onPreviewEmail }) {
                 required
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 text-xs px-3.5 py-3 rounded-sm outline-none"
+                placeholder="admin@yourcafe.com"
+                className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 px-3.5 py-3 rounded-sm outline-none"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-light mb-1">
-                Admin Password
+              <label className="block text-muted-light uppercase font-semibold tracking-wider mb-1.5">
+                Password
               </label>
               <input
                 type="password"
                 required
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 text-xs px-3.5 py-3 rounded-sm outline-none"
+                placeholder="••••••••"
+                className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 px-3.5 py-3 rounded-sm outline-none"
               />
             </div>
 
             <button
               type="submit"
               disabled={isAuthLoading}
-              className="w-full bg-coffee-400 hover:bg-coffee-500 text-background-darker font-bold text-xs uppercase tracking-widest py-3.5 rounded-sm transition-all shadow-md mt-2"
+              className="w-full py-3 bg-coffee-400 hover:bg-coffee-500 disabled:opacity-50 text-background-darker font-bold uppercase tracking-wider text-xs rounded-sm transition-all shadow-md"
             >
-              {isAuthLoading ? "Verifying Authority..." : "Login To Admin Dashboard"}
+              {isAuthLoading ? "Authenticating..." : "Sign In to Admin Dashboard"}
             </button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-white/10 text-center text-xs text-muted">
-            <span className="block text-[11px] text-coffee-300 font-semibold mb-1">
-              Default Staff Credentials:
-            </span>
-            <p className="font-mono text-[11px] text-cream-300">
-              admin@duplexcafe.com • duplex123
-            </p>
+          <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                if (onExitAdmin) onExitAdmin();
+              }}
+              className="text-muted hover:text-cream-100 transition-colors uppercase tracking-wider text-[11px]"
+            >
+              ← Back to Main Website
+            </button>
+            <span className="text-[11px] text-coffee-300 font-mono">v2.0 • Firebase</span>
           </div>
-
         </div>
       </div>
     );
   }
 
+  // ---------------- DASHBOARD VIEW ----------------
   return (
-    <div className="min-h-screen bg-[#0E0D0C] text-cream-200 font-sans flex flex-col selection:bg-coffee-500 selection:text-background-darker">
-      
-      {/* Top Authority Header */}
-      <header className="bg-[#141211] border-b border-white/10 py-3 px-4 sm:px-8 flex items-center justify-between sticky top-0 z-40">
+    <div className="min-h-screen bg-background-darker text-cream-100 font-sans flex flex-col">
+      {toast && (
+        <div
+          className={`fixed top-4 right-4 z-[60] px-4 py-2.5 rounded-sm text-xs font-semibold uppercase tracking-wider shadow-xl animate-fade-in ${
+            toast.kind === "success"
+              ? "bg-emerald-950 border border-emerald-500/40 text-emerald-300"
+              : toast.kind === "error"
+              ? "bg-red-950 border border-red-500/40 text-red-300"
+              : "bg-background-card border border-white/15 text-cream-100"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
+
+      <header className="bg-background-card border-b border-white/10 px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-xl">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full border border-coffee-400 bg-coffee-500/10 flex items-center justify-center text-coffee-300 font-serif font-bold text-xs">
-            DLC
+          <div className="w-10 h-10 rounded-full border border-coffee-400 bg-coffee-500/10 text-coffee-300 flex items-center justify-center shadow-md">
+            <ShieldCheck className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-serif text-lg text-cream-100 uppercase tracking-widest">
-                Duplex Lounge <span className="text-coffee-400">Admin Authority</span>
-              </h1>
-              <span className="px-2 py-0.5 rounded-xs bg-red-950/80 border border-red-500/40 text-red-400 text-[9px] font-bold uppercase tracking-wider">
-                Staff Control
+            <h1 className="font-serif text-lg sm:text-xl text-cream-100 uppercase tracking-wide flex items-center gap-2">
+              <span>Duplex Lounge Cafe</span>
+              <span className="px-2 py-0.5 rounded-full bg-coffee-500/20 text-coffee-300 text-[10px] font-bold tracking-widest uppercase border border-coffee-500/30">
+                Staff Admin
               </span>
-            </div>
-            <span className="text-[10px] text-muted font-sans">
-              Logged in: {adminUser.email}
-            </span>
+            </h1>
+            <p className="text-xs text-muted font-light">
+              Table Bookings • Pending Approvals • Confirm / Reject / Cancel
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 text-xs">
+          <span className="hidden md:inline-block text-muted text-[11px]">
+            Logged in as: <strong className="text-cream-100">{adminUser.email}</strong>
+          </span>
+
           <button
-            onClick={onExitAdmin}
-            className="px-3 py-1.5 rounded-sm bg-white/10 hover:bg-white/15 text-cream-200 text-xs font-semibold uppercase tracking-wider transition-colors"
+            onClick={() => {
+              if (onExitAdmin) onExitAdmin();
+            }}
+            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-muted hover:text-cream-100 rounded-sm uppercase tracking-wider text-[11px] font-medium transition-colors border border-white/10"
           >
-            Exit To Website
+            Visit Website
           </button>
+
           <button
             onClick={handleLogout}
-            className="px-3 py-1.5 rounded-sm bg-red-950/50 border border-red-500/40 text-red-300 text-xs font-semibold uppercase tracking-wider hover:bg-red-900/50 transition-colors inline-flex items-center gap-1.5"
+            className="px-3.5 py-2 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded-sm uppercase tracking-wider text-[11px] font-bold transition-colors border border-red-500/30 flex items-center gap-1.5"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Logout</span>
+            <span>Log Out</span>
           </button>
         </div>
       </header>
 
-      {/* KPI Overview Bar */}
-      <div className="bg-[#191614] border-b border-white/10 px-4 sm:px-8 py-3.5">
-        <div className="max-w-7xl mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
-          
-          <div className="p-3 bg-white/5 border border-white/5 rounded-sm">
-            <span className="text-[10px] uppercase text-muted block">Today's Bookings</span>
-            <span className="font-serif text-xl font-bold text-cream-100">{metrics.todayCount}</span>
+      <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto space-y-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="p-4 bg-background-card border border-white/10 rounded-sm space-y-1">
+            <span className="text-[11px] text-muted uppercase tracking-wider font-semibold block">Total</span>
+            <span className="font-serif text-2xl font-bold text-cream-100">{metrics.total}</span>
           </div>
-
-          <div className="p-3 bg-white/5 border border-white/5 rounded-sm">
-            <span className="text-[10px] uppercase text-muted block">Pending Actions</span>
-            <span className="font-serif text-xl font-bold text-amber-400">{metrics.pendingCount}</span>
+          <div className="p-4 bg-background-card border border-amber-500/30 rounded-sm space-y-1">
+            <span className="text-[11px] text-amber-400 uppercase tracking-wider font-semibold block">Pending</span>
+            <span className="font-serif text-2xl font-bold text-amber-400">{metrics.pending}</span>
           </div>
-
-          <div className="p-3 bg-white/5 border border-white/5 rounded-sm">
-            <span className="text-[10px] uppercase text-muted block">Active Seated</span>
-            <span className="font-serif text-xl font-bold text-blue-400">{metrics.activeCount}</span>
+          <div className="p-4 bg-background-card border border-emerald-500/30 rounded-sm space-y-1">
+            <span className="text-[11px] text-emerald-400 uppercase tracking-wider font-semibold block">Confirmed</span>
+            <span className="font-serif text-2xl font-bold text-emerald-400">{metrics.confirmed}</span>
           </div>
-
-          <div className="p-3 bg-white/5 border border-white/5 rounded-sm">
-            <span className="text-[10px] uppercase text-muted block">Special Requests</span>
-            <span className="font-serif text-xl font-bold text-purple-400">{metrics.specialReqCount}</span>
+          <div className="p-4 bg-background-card border border-red-500/30 rounded-sm space-y-1">
+            <span className="text-[11px] text-red-400 uppercase tracking-wider font-semibold block">Cancelled/Rejected</span>
+            <span className="font-serif text-2xl font-bold text-red-400">{metrics.cancelled}</span>
           </div>
-
-          <div className="p-3 bg-white/5 border border-white/5 rounded-sm">
-            <span className="text-[10px] uppercase text-muted block">Online Collections</span>
-            <span className="font-serif text-xl font-bold text-emerald-400">₹{metrics.paidOnlineTotal}</span>
+          <div className="p-4 bg-background-card border border-white/10 rounded-sm space-y-1">
+            <span className="text-[11px] text-coffee-300 uppercase tracking-wider font-semibold block">Today</span>
+            <span className="font-serif text-2xl font-bold text-coffee-300">{metrics.todayCount}</span>
           </div>
-
-          <div className="p-3 bg-white/5 border border-white/5 rounded-sm">
-            <span className="text-[10px] uppercase text-muted block">Counter Due</span>
-            <span className="font-serif text-xl font-bold text-coffee-300">₹{metrics.pendingCounterTotal}</span>
-          </div>
-
         </div>
-      </div>
 
-      {/* Admin Authority Navigation Tabs */}
-      <div className="bg-[#141211] border-b border-white/10 px-4 sm:px-8 flex items-center gap-1 overflow-x-auto text-xs font-bold uppercase tracking-wider">
-        <button
-          onClick={() => setActiveTab("bookings")}
-          className={`py-3.5 px-4 border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${
-            activeTab === "bookings"
-              ? "border-coffee-400 text-coffee-300 bg-white/5"
-              : "border-transparent text-muted hover:text-cream-200"
-          }`}
-        >
-          <Calendar className="w-4 h-4" />
-          <span>Manage Bookings ({filteredBookings.length})</span>
-        </button>
+        <div className="p-4 bg-background-card border border-white/10 rounded-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+            {[
+              { id: "ALL", label: "All Dates" },
+              { id: "TODAY", label: "Today" },
+              { id: "TOMORROW", label: "Tomorrow" }
+            ].map((d) => (
+              <button
+                key={d.id}
+                onClick={() => setDateFilter(d.id)}
+                className={`px-3 py-1.5 rounded-sm uppercase tracking-wider font-semibold transition-all ${
+                  dateFilter === d.id
+                    ? "bg-coffee-400 text-background-darker shadow-sm"
+                    : "bg-background-darker text-muted hover:text-cream-100"
+                }`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
 
-        <button
-          onClick={() => setActiveTab("tables")}
-          className={`py-3.5 px-4 border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${
-            activeTab === "tables"
-              ? "border-coffee-400 text-coffee-300 bg-white/5"
-              : "border-transparent text-muted hover:text-cream-200"
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          <span>Floor Plan & Tables</span>
-        </button>
+          <div className="flex flex-wrap items-center gap-2.5 flex-1 sm:flex-initial justify-end">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 px-3 py-2 rounded-sm outline-none text-xs"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
 
-        <button
-          onClick={() => setActiveTab("requests")}
-          className={`py-3.5 px-4 border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${
-            activeTab === "requests"
-              ? "border-coffee-400 text-coffee-300 bg-white/5"
-              : "border-transparent text-muted hover:text-cream-200"
-          }`}
-        >
-          <Gift className="w-4 h-4" />
-          <span>Special Requests ({specialRequestsList.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab("payments")}
-          className={`py-3.5 px-4 border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${
-            activeTab === "payments"
-              ? "border-coffee-400 text-coffee-300 bg-white/5"
-              : "border-transparent text-muted hover:text-cream-200"
-          }`}
-        >
-          <CreditCard className="w-4 h-4" />
-          <span>Payments Ledger</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab("media")}
-          className={`py-3.5 px-4 border-b-2 flex items-center gap-2 whitespace-nowrap transition-colors ${
-            activeTab === "media"
-              ? "border-coffee-400 text-coffee-300 bg-white/5"
-              : "border-transparent text-muted hover:text-cream-200"
-          }`}
-        >
-          <Upload className="w-4 h-4" />
-          <span>Upload Photos</span>
-        </button>
-      </div>
-
-      {/* Main Container */}
-      <main className="flex-1 p-4 sm:p-8 max-w-7xl mx-auto w-full">
-        
-        {/* ============================================================== */}
-        {/* TAB 1: MANAGE BOOKINGS & SCHEDULE TIMELINE                     */}
-        {/* ============================================================== */}
-        {activeTab === "bookings" && (
-          <div className="space-y-6">
-            
-            {/* Filter Bar */}
-            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-[#191614] p-4 border border-white/10 rounded-sm">
-              
-              {/* Date Quick Filter */}
-              <div className="sm:col-span-4 flex items-center gap-1.5">
-                <span className="text-[11px] text-muted uppercase font-bold">Date:</span>
-                {["TODAY", "TOMORROW", "ALL"].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDateFilter(d)}
-                    className={`px-2.5 py-1.5 text-[11px] font-bold uppercase rounded-sm transition-colors ${
-                      dateFilter === d
-                        ? "bg-coffee-400 text-background-darker shadow-sm"
-                        : "bg-white/5 text-muted hover:text-cream-100"
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
-                <input
-                  type="date"
-                  value={["TODAY", "TOMORROW", "ALL"].includes(dateFilter) ? "" : dateFilter}
-                  onChange={(e) => setDateFilter(e.target.value)}
-                  className="bg-background-darker border border-white/15 text-cream-100 text-xs px-2 py-1 rounded-sm outline-none"
-                />
-              </div>
-
-              {/* Status Filter */}
-              <div className="sm:col-span-3 flex items-center gap-1.5">
-                <span className="text-[11px] text-muted uppercase font-bold">Status:</span>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="flex-1 bg-background-darker border border-white/15 text-cream-100 text-xs px-2.5 py-1.5 rounded-sm outline-none"
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="PENDING">Pending (Requires Action)</option>
-                  <option value="CONFIRMED">Confirmed</option>
-                  <option value="SEATED">Seated & Active</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </select>
-              </div>
-
-              {/* Search Bar */}
-              <div className="sm:col-span-5 relative">
-                <Search className="w-4 h-4 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search by customer name, phone, Booking ID..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-background-darker border border-white/15 text-cream-100 text-xs pl-9 pr-3 py-1.5 rounded-sm outline-none focus:border-coffee-400"
-                />
-              </div>
+            <div className="relative flex-1 sm:w-64">
+              <Search className="w-3.5 h-3.5 text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search guest, phone, ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 pl-8 pr-3 py-2 rounded-sm outline-none text-xs"
+              />
             </div>
+          </div>
+        </div>
 
-            {/* Bookings Authority Grid */}
-            <div className="space-y-3">
-              {filteredBookings.length === 0 ? (
-                <div className="p-12 text-center bg-[#191614] border border-white/10 rounded-sm text-muted text-xs">
-                  No reservations matching your filters for this date.
-                </div>
-              ) : (
-                filteredBookings.map((b) => {
-                  const hasSpecialReq =
-                    (b.reservation?.specialRequests && b.reservation.specialRequests.trim().length > 0) ||
-                    (b.reservation?.occasion && b.reservation.occasion !== "Casual Hangout");
+        <div className="bg-background-card border border-white/10 rounded-sm shadow-xl overflow-hidden">
+          <div className="p-4 bg-background-darker border-b border-white/10 flex items-center justify-between">
+            <h2 className="font-serif text-base text-cream-100 uppercase tracking-wider flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-coffee-400" />
+              <span>Reservations ({filteredBookings.length})</span>
+            </h2>
+            <span className="text-[11px] text-muted">New bookings arrive as PENDING</span>
+          </div>
 
-                  return (
-                    <div
-                      key={b.id || b.bookingId}
-                      className="bg-[#191614] hover:bg-[#1f1b19] border border-white/10 hover:border-coffee-400/40 rounded-sm p-4 sm:p-5 transition-all shadow-lg"
-                    >
-                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
-                        
-                        {/* Column 1: Time, Area & Reference */}
-                        <div className="lg:col-span-3">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-serif text-lg font-bold text-coffee-300">
-                              {b.reservation?.timeSlot}
-                            </span>
-                            <span className="text-[10px] text-muted">
-                              ({b.reservation?.date})
-                            </span>
-                          </div>
-                          <span className="text-xs font-semibold text-cream-100 block">
-                            {b.reservation?.areaName}
-                          </span>
-                          <span className="text-[11px] text-muted block">
-                            👥 {b.reservation?.guestCount} Guests • Ref: <strong className="text-cream-300">{b.bookingId}</strong>
-                          </span>
-                        </div>
+          {isLoadingBookings ? (
+            <div className="p-12 text-center text-muted text-xs">Loading bookings…</div>
+          ) : filteredBookings.length === 0 ? (
+            <div className="p-12 text-center text-muted text-xs space-y-2">
+              <Calendar className="w-10 h-10 mx-auto text-white/20" />
+              <p>No reservations found matching the selected filters.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-white/10 bg-background-darker/60 text-[11px] text-muted uppercase tracking-wider font-semibold">
+                    <th className="p-3.5">Booking ID</th>
+                    <th className="p-3.5">Date & Time</th>
+                    <th className="p-3.5">Seating Zone</th>
+                    <th className="p-3.5">Guests</th>
+                    <th className="p-3.5">Customer Contact</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {filteredBookings.map((b) => {
+                    const bookingId = b.bookingId || b.id;
+                    const dateStr = b.date || b.reservation?.date;
+                    const timeSlot = b.timeSlot || b.reservation?.timeSlot;
+                    const zoneName = b.zoneName || b.reservation?.areaName || "Seating Zone";
+                    const partySize = b.partySize || b.reservation?.guestCount || 2;
+                    const custName = b.name || b.customer?.name || "Guest";
+                    const custPhone = b.phone || b.customer?.phone || "N/A";
+                    const status = (b.status || "pending").toLowerCase();
+                    const isCancelled = status === "cancelled" || status === "rejected";
 
-                        {/* Column 2: Customer Details & Contact Actions */}
-                        <div className="lg:col-span-3 border-t sm:border-t-0 sm:border-l border-white/10 sm:pl-4">
-                          <span className="font-semibold text-cream-100 block text-xs">
-                            {b.customer?.name}
-                          </span>
-                          <span className="text-muted text-[11px] block font-mono">
-                            {b.customer?.phone}
-                          </span>
-                          {b.customer?.email && (
-                            <span className="text-muted-dark text-[10px] block truncate max-w-[180px]">
-                              {b.customer?.email}
-                            </span>
-                          )}
-
-                          {/* Direct Call & Direct WhatsApp to Customer */}
-                          <div className="flex items-center gap-2 mt-2">
-                            <a
-                              href={`tel:${b.customer?.phone}`}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-xs bg-white/10 hover:bg-white/20 text-cream-100 text-[10px] font-bold uppercase transition-colors"
-                            >
-                              <PhoneCall className="w-3 h-3 text-coffee-400" />
-                              <span>Call</span>
-                            </a>
-
-                            <a
-                              href={getWhatsAppUrl(
-                                encodeURIComponent(
-                                  `Hello ${b.customer?.name}, this is Duplex Lounge Cafe regarding your reservation #${b.bookingId}.`
-                                ),
-                                b.customer?.phone
-                              )}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-xs bg-emerald-900/40 hover:bg-emerald-900/70 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold uppercase transition-colors"
-                            >
-                              <MessageCircle className="w-3 h-3" />
-                              <span>WhatsApp</span>
-                            </a>
-                          </div>
-                        </div>
-
-                        {/* Column 3: Special Request & Pre-order */}
-                        <div className="lg:col-span-3 border-t sm:border-t-0 sm:border-l border-white/10 sm:pl-4">
-                          {hasSpecialReq && (
-                            <div className="mb-2 p-2 rounded-xs bg-purple-950/40 border border-purple-500/40 text-purple-200 text-[11px]">
-                              <div className="flex items-center gap-1 font-bold text-[10px] uppercase text-purple-300">
-                                <Sparkles className="w-3 h-3" />
-                                <span>Special Request ({b.reservation?.occasion}):</span>
-                              </div>
-                              <p className="mt-0.5 italic">
-                                "{b.reservation?.specialRequests || b.reservation?.occasion}"
-                              </p>
-                            </div>
-                          )}
-
-                          <div className="text-xs">
-                            <div className="flex justify-between text-muted">
-                              <span>Food Bill:</span>
-                              <span className="text-cream-100 font-bold">
-                                ₹{b.preOrder?.totalBill || 0}
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center mt-1">
-                              <span className="text-[10px] text-muted uppercase">Payment:</span>
-                              <span
-                                className={`px-2 py-0.5 rounded-xs text-[9px] font-bold uppercase border ${
-                                  b.payment?.status === "PAID"
-                                    ? "bg-emerald-950/60 border-emerald-500/40 text-emerald-400"
-                                    : "bg-amber-950/60 border-amber-500/40 text-amber-400"
-                                }`}
-                              >
-                                {b.payment?.status === "PAID" ? "✓ Paid Online" : "● Pay at Counter"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Column 4: Admin Authority Actions */}
-                        <div className="lg:col-span-3 flex flex-col gap-1.5 border-t sm:border-t-0 sm:border-l border-white/10 sm:pl-4">
-                          <div className="flex items-center gap-1.5">
-                            <select
-                              value={b.status}
-                              onChange={(e) => handleAdminStatusAction(b.id || b.bookingId, e.target.value)}
-                              className="flex-1 bg-background-darker border border-white/20 text-cream-100 text-xs font-bold px-2.5 py-1.5 rounded-sm outline-none"
-                            >
-                              <option value="PENDING">PENDING</option>
-                              <option value="CONFIRMED">CONFIRMED</option>
-                              <option value="SEATED">SEATED (OCCUPIED)</option>
-                              <option value="COMPLETED">COMPLETED</option>
-                              <option value="CANCELLED">CANCELLED / REJECT</option>
-                            </select>
-
-                            <button
-                              type="button"
-                              title="Print KOT & Receipt"
-                              onClick={() => printEmailReceipt(b)}
-                              className="p-2 rounded-sm bg-white/10 hover:bg-white/20 text-cream-200"
-                            >
-                              <Printer className="w-4 h-4 text-coffee-400" />
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {b.status === "PENDING" && (
-                              <button
-                                type="button"
-                                onClick={() => handleAdminStatusAction(b.id || b.bookingId, "CONFIRMED")}
-                                className="py-1 px-2 rounded-xs bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold uppercase transition-colors"
-                              >
-                                ✓ Confirm
-                              </button>
-                            )}
-
-                            {b.status === "CONFIRMED" && (
-                              <button
-                                type="button"
-                                onClick={() => handleAdminStatusAction(b.id || b.bookingId, "SEATED")}
-                                className="py-1 px-2 rounded-xs bg-blue-700 hover:bg-blue-600 text-white text-[10px] font-bold uppercase transition-colors"
-                              >
-                                🪑 Seat Guests
-                              </button>
-                            )}
-
-                            {b.status === "SEATED" && (
-                              <button
-                                type="button"
-                                onClick={() => handleAdminStatusAction(b.id || b.bookingId, "COMPLETED")}
-                                className="py-1 px-2 rounded-xs bg-coffee-500 hover:bg-coffee-600 text-background-darker text-[10px] font-bold uppercase transition-colors"
-                              >
-                                🏁 Finish / Free Table
-                              </button>
-                            )}
-
+                    return (
+                      <tr key={bookingId} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="p-3.5 font-mono font-bold text-coffee-300">#{bookingId}</td>
+                        <td className="p-3.5 whitespace-nowrap">
+                          <span className="font-semibold text-cream-100 block">{dateStr}</span>
+                          <span className="text-[11px] text-coffee-300 font-medium">{timeSlot}</span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="text-cream-100 font-medium">{zoneName}</span>
+                        </td>
+                        <td className="p-3.5 font-bold text-cream-100">{partySize}</td>
+                        <td className="p-3.5 space-y-0.5">
+                          <span className="font-semibold text-cream-100 block">{custName}</span>
+                          <span className="text-[11px] text-muted block">{custPhone}</span>
+                        </td>
+                        <td className="p-3.5 whitespace-nowrap">
+                          <StatusBadge status={status} />
+                        </td>
+                        <td className="p-3.5 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => setSelectedBooking(b)}
-                              className="py-1 px-2 rounded-xs bg-white/5 hover:bg-white/15 text-cream-200 text-[10px] font-semibold uppercase transition-colors"
+                              className="px-2.5 py-1.5 bg-white/10 hover:bg-white/15 text-cream-100 rounded-sm text-[11px] uppercase tracking-wider font-semibold transition-colors"
                             >
-                              Details / Notes
+                              Details
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCancelModalBooking(b);
+                                setCancelReason(
+                                  isCancelled
+                                    ? "Re-cancelled by Cafe Admin"
+                                    : "Customer requested cancellation"
+                                );
+                              }}
+                              disabled={actionBusyId === bookingId}
+                              className={`px-2.5 py-1.5 rounded-sm text-[11px] uppercase tracking-wider font-bold transition-colors ${
+                                isCancelled
+                                  ? "bg-neutral-800 hover:bg-neutral-700 text-muted border border-white/10"
+                                  : "bg-red-950/50 hover:bg-red-900/60 text-red-300 border border-red-500/30"
+                              }`}
+                            >
+                              Cancel
                             </button>
                           </div>
-                        </div>
-
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* TAB 2: FLOOR PLAN & TABLE MANAGEMENT                           */}
-        {/* ============================================================== */}
-        {activeTab === "tables" && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-serif text-2xl text-cream-100 uppercase tracking-wide">
-                  Live Table Occupancy & Seating Floor Plan
-                </h3>
-                <p className="text-xs text-muted">
-                  Monitor table status across Ground Floor & Upper Mezzanine Lounge.
-                </p>
-              </div>
-
-              {/* Status Legend */}
-              <div className="flex items-center gap-3 text-[11px] font-bold">
-                <span className="flex items-center gap-1 text-emerald-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" /> Available
-                </span>
-                <span className="flex items-center gap-1 text-amber-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Reserved
-                </span>
-                <span className="flex items-center gap-1 text-blue-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-400" /> Occupied
-                </span>
-                <span className="flex items-center gap-1 text-neutral-400">
-                  <span className="w-2.5 h-2.5 rounded-full bg-neutral-500" /> Blocked
-                </span>
-              </div>
-            </div>
-
-            {/* Tables Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {tableStates.map((table) => {
-                const isOccupied = table.status === "OCCUPIED";
-                const isReserved = table.status === "RESERVED";
-                const isAvailable = table.status === "AVAILABLE";
-
-                return (
-                  <div
-                    key={table.id}
-                    className={`p-5 rounded-sm border transition-all ${
-                      isOccupied
-                        ? "bg-blue-950/30 border-blue-500/50 text-blue-200"
-                        : isReserved
-                        ? "bg-amber-950/30 border-amber-500/50 text-amber-200"
-                        : isAvailable
-                        ? "bg-emerald-950/20 border-emerald-500/40 text-emerald-200"
-                        : "bg-neutral-900 border-neutral-700 text-neutral-400"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="w-8 h-8 rounded-sm bg-black/60 border border-white/10 flex items-center justify-center font-serif font-bold text-sm text-cream-100">
-                        {table.number}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded-xs text-[9px] font-bold uppercase border ${
-                          isOccupied
-                            ? "bg-blue-900/60 border-blue-400 text-blue-300"
-                            : isReserved
-                            ? "bg-amber-900/60 border-amber-400 text-amber-300"
-                            : isAvailable
-                            ? "bg-emerald-900/60 border-emerald-400 text-emerald-300"
-                            : "bg-neutral-800 border-neutral-600 text-neutral-400"
-                        }`}
-                      >
-                        {table.status}
-                      </span>
-                    </div>
-
-                    <h4 className="font-semibold text-cream-100 text-sm mb-1">
-                      {table.name}
-                    </h4>
-                    <span className="text-[11px] text-muted block mb-4">
-                      {table.floor} • Max Capacity: {table.capacity} Persons
-                    </span>
-
-                    {/* Quick Authority State Changer */}
-                    <div className="pt-3 border-t border-white/10">
-                      <label className="text-[10px] uppercase font-bold text-muted block mb-1">
-                        Change Table Status:
-                      </label>
-                      <select
-                        value={table.status}
-                        onChange={(e) => handleToggleTableStatus(table.id, e.target.value)}
-                        className="w-full bg-background-darker border border-white/20 text-cream-100 text-xs px-2 py-1.5 rounded-sm outline-none font-semibold"
-                      >
-                        <option value="AVAILABLE">AVAILABLE</option>
-                        <option value="RESERVED">RESERVED</option>
-                        <option value="OCCUPIED">OCCUPIED / SEATED</option>
-                        <option value="BLOCKED">BLOCKED / MAINTENANCE</option>
-                      </select>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* TAB 3: SPECIAL REQUESTS & EVENT BOARD                          */}
-        {/* ============================================================== */}
-        {activeTab === "requests" && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="font-serif text-2xl text-cream-100 uppercase tracking-wide">
-                Special Requests, Birthdays & Netflix Lounge Events
-              </h3>
-              <p className="text-xs text-muted">
-                Highlighted custom customer arrangements requiring staff preparation.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {specialRequestsList.length === 0 ? (
-                <div className="col-span-2 p-12 text-center bg-[#191614] border border-white/10 rounded-sm text-muted text-xs">
-                  No special requests currently queued.
-                </div>
-              ) : (
-                specialRequestsList.map((b) => (
-                  <div
-                    key={b.id || b.bookingId}
-                    className="p-5 rounded-sm bg-[#191614] border border-purple-500/40 shadow-xl space-y-3"
-                  >
-                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                      <div className="flex items-center gap-2 text-purple-300 text-xs font-bold uppercase tracking-wider">
-                        <Sparkles className="w-4 h-4" />
-                        <span>{b.reservation?.occasion || "Special Request"}</span>
-                      </div>
-                      <span className="font-serif text-coffee-300 font-bold text-xs">
-                        #{b.bookingId}
-                      </span>
-                    </div>
-
-                    <div className="p-3 bg-purple-950/30 border border-purple-500/20 rounded-sm text-xs text-purple-200 italic font-sans">
-                      "{b.reservation?.specialRequests || "No custom text — Occasion selected"}"
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-xs text-muted">
-                      <div>
-                        <span className="text-[10px] uppercase block">Customer</span>
-                        <strong className="text-cream-100">{b.customer?.name}</strong> ({b.customer?.phone})
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase block">Date & Time</span>
-                        <strong className="text-cream-100">{b.reservation?.date} at {b.reservation?.timeSlot}</strong>
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-white/5 flex items-center justify-between text-xs">
-                      <span className="text-coffee-300 font-semibold">{b.reservation?.areaName}</span>
-                      <a
-                        href={`tel:${b.customer?.phone}`}
-                        className="inline-flex items-center gap-1 text-coffee-400 hover:underline"
-                      >
-                        <PhoneCall className="w-3.5 h-3.5" />
-                        <span>Call Customer to Confirm Details</span>
-                      </a>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* TAB 4: PAYMENTS LEDGER                                         */}
-        {/* ============================================================== */}
-        {activeTab === "payments" && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="font-serif text-2xl text-cream-100 uppercase tracking-wide">
-                Payments & Revenue Ledger
-              </h3>
-              <p className="text-xs text-muted">
-                Audit all online UPI QR payments, card transactions, and counter dues.
-              </p>
-            </div>
-
-            <div className="bg-[#191614] border border-white/10 rounded-sm p-5 shadow-xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-background-darker text-muted uppercase text-[10px] border-b border-white/10">
-                    <tr>
-                      <th className="p-3">Txn ID</th>
-                      <th className="p-3">Booking ID</th>
-                      <th className="p-3">Customer</th>
-                      <th className="p-3">Amount</th>
-                      <th className="p-3">Method</th>
-                      <th className="p-3">Status</th>
-                      <th className="p-3">Timestamp</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5 font-sans font-light">
-                    {payments.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="p-8 text-center text-muted">
-                          No payment transactions recorded yet.
                         </td>
                       </tr>
-                    ) : (
-                      payments.map((p) => (
-                        <tr key={p.id || p.transactionId} className="hover:bg-white/5">
-                          <td className="p-3 font-mono text-[11px] text-coffee-300 font-bold">
-                            {p.transactionId}
-                          </td>
-                          <td className="p-3 text-cream-200">{p.bookingId}</td>
-                          <td className="p-3 font-medium text-cream-100">{p.customer?.name}</td>
-                          <td className="p-3 font-bold text-emerald-400">₹{p.amount}</td>
-                          <td className="p-3 text-muted uppercase font-bold text-[10px]">{p.method}</td>
-                          <td className="p-3">
-                            <span className="px-2 py-0.5 rounded-xs text-[9px] font-bold uppercase bg-emerald-950/60 border border-emerald-500/40 text-emerald-400">
-                              {p.status}
-                            </span>
-                          </td>
-                          <td className="p-3 text-muted text-[11px]">
-                            {new Date(p.createdAt).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* TAB 5: PHOTO & MEDIA UPLOADER                                  */}
-        {/* ============================================================== */}
-        {activeTab === "media" && (
-          <div className="space-y-8">
-            <div className="bg-[#191614] border border-white/10 rounded-sm p-6 shadow-xl">
-              <div className="flex items-center gap-2 mb-4 text-coffee-400 text-xs font-semibold uppercase tracking-widest">
-                <Upload className="w-4 h-4" />
-                <span>Upload New Cafe / Menu Photo</span>
-              </div>
-
-              {uploadMsg && (
-                <div className={`p-3 rounded-sm mb-4 text-xs font-medium ${
-                  uploadMsg.startsWith("✓")
-                    ? "bg-emerald-950/50 border border-emerald-500/40 text-emerald-300"
-                    : "bg-red-950/50 border border-red-500/40 text-red-300"
-                }`}>
-                  {uploadMsg}
-                </div>
-              )}
-
-              <form onSubmit={handleUploadImage} className="grid grid-cols-1 md:grid-cols-12 gap-6">
-                
-                {/* File picker & Preview */}
-                <div className="md:col-span-5 flex flex-col justify-center items-center border-2 border-dashed border-white/15 hover:border-coffee-400/60 rounded-sm p-6 bg-background-darker text-center transition-colors">
-                  {uploadPreview ? (
-                    <div className="relative w-full aspect-video rounded-sm overflow-hidden">
-                      <img
-                        src={uploadPreview}
-                        alt="Upload Preview"
-                        className="w-full h-full object-cover"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUploadFile(null);
-                          setUploadPreview(null);
-                        }}
-                        className="absolute top-2 right-2 p-1 rounded-full bg-black/80 text-cream-100 hover:text-red-400"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <ImageIcon className="w-12 h-12 text-coffee-400/60 mx-auto mb-3" />
-                      <label className="cursor-pointer inline-flex items-center gap-2 bg-coffee-400 hover:bg-coffee-500 text-background-darker font-bold text-xs uppercase tracking-wider px-4 py-2 rounded-sm transition-colors">
-                        <span>Select Image File</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleFileSelect}
-                          className="hidden"
-                        />
-                      </label>
-                      <span className="text-[11px] text-muted block mt-2">
-                        JPG, PNG, WebP up to 5MB
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Form metadata */}
-                <div className="md:col-span-7 space-y-4">
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-light mb-1">
-                      Image Title *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Mezzanine Netflix Screening Lounge"
-                      value={uploadTitle}
-                      onChange={(e) => setUploadTitle(e.target.value)}
-                      className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 text-xs px-3.5 py-2.5 rounded-sm outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-light mb-1">
-                      Gallery Category *
-                    </label>
-                    <select
-                      value={uploadCategory}
-                      onChange={(e) => setUploadCategory(e.target.value)}
-                      className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 text-xs px-3.5 py-2.5 rounded-sm outline-none"
-                    >
-                      <option value="ambience">Lounge Ambience</option>
-                      <option value="mezzanine">Mezzanine & Stairs</option>
-                      <option value="neon">Neon Booths</option>
-                      <option value="food">Pizzas & Momos</option>
-                      <option value="drinks">Coffee & Beverages</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-light mb-1">
-                      Short Caption / Description
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Cozy fairy-lit upper floor lounge setup"
-                      value={uploadCaption}
-                      onChange={(e) => setUploadCaption(e.target.value)}
-                      className="w-full bg-background-darker border border-white/15 focus:border-coffee-400 text-cream-100 text-xs px-3.5 py-2.5 rounded-sm outline-none"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={!uploadFile || isUploading}
-                    className="w-full inline-flex items-center justify-center gap-2 bg-coffee-400 hover:bg-coffee-500 disabled:opacity-40 text-background-darker font-bold text-xs uppercase tracking-widest py-3 rounded-sm transition-all shadow-md"
-                  >
-                    <span>{isUploading ? `Uploading (${uploadProgress}%)...` : "Publish To Live Gallery"}</span>
-                    <Upload className="w-4 h-4" />
-                  </button>
-                </div>
-
-              </form>
-            </div>
-
-            {/* Uploaded Photos Library */}
-            <div className="bg-[#191614] border border-white/10 rounded-sm p-6 shadow-xl">
-              <h3 className="font-serif text-xl text-cream-100 uppercase tracking-wide mb-4">
-                Live Uploaded Media ({galleryImages.length})
-              </h3>
-              
-              {galleryImages.length === 0 ? (
-                <div className="p-8 text-center text-muted text-xs">
-                  No custom images uploaded yet. Upload above to add photos to the live website gallery!
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {galleryImages.map((img) => (
-                    <div
-                      key={img.id}
-                      className="bg-background-darker border border-white/10 rounded-sm overflow-hidden flex flex-col justify-between"
-                    >
-                      <div className="relative aspect-video overflow-hidden">
-                        <img
-                          src={img.src}
-                          alt={img.title}
-                          className="w-full h-full object-cover"
-                        />
-                        <span className="absolute top-2 left-2 px-2 py-0.5 rounded-xs bg-black/80 text-coffee-300 text-[10px] uppercase font-bold">
-                          {img.category}
-                        </span>
-                      </div>
-
-                      <div className="p-3 flex items-center justify-between">
-                        <div>
-                          <h4 className="text-xs font-semibold text-cream-100 truncate max-w-[140px]">
-                            {img.title}
-                          </h4>
-                          <span className="text-[10px] text-muted block">
-                            {new Date(img.uploadedAt).toLocaleDateString()}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteImage(img.id, img.storagePath)}
-                          className="p-1.5 rounded-sm bg-red-950/40 hover:bg-red-900/60 text-red-400 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
+          )}
+        </div>
       </main>
 
-      {/* Booking Inspection & Authority Modal / Drawer */}
+      {/* DETAILS DRAWER */}
       {selectedBooking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in font-sans">
-          <div className="relative w-full max-w-xl bg-background-card border border-white/15 rounded-sm p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            
+          <div className="relative w-full max-w-lg bg-background-card border border-white/15 rounded-sm shadow-2xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <div>
-                <span className="text-[10px] text-muted uppercase">Authority Inspector</span>
-                <h3 className="font-serif text-xl text-cream-100">
-                  Booking #{selectedBooking.bookingId}
-                </h3>
+                <span className="text-[10px] text-coffee-300 font-bold uppercase tracking-widest">Reservation Inspection</span>
+                <h3 className="font-serif text-xl text-cream-100">Booking #{selectedBooking.bookingId || selectedBooking.id}</h3>
               </div>
               <button
                 onClick={() => setSelectedBooking(null)}
-                className="p-1 text-muted hover:text-cream-100"
+                className="p-1 text-muted hover:text-cream-100 rounded-sm"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Details */}
-            <div className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3 p-3 bg-background-darker rounded-sm">
-                <div>
-                  <span className="text-muted block text-[10px] uppercase">Customer</span>
-                  <strong className="text-cream-100 text-sm">{selectedBooking.customer?.name}</strong>
-                  <span className="block text-muted">{selectedBooking.customer?.phone}</span>
-                </div>
-                <div>
-                  <span className="text-muted block text-[10px] uppercase">Reservation</span>
-                  <strong className="text-cream-100">{selectedBooking.reservation?.date} at {selectedBooking.reservation?.timeSlot}</strong>
-                  <span className="block text-coffee-300 font-semibold">{selectedBooking.reservation?.areaName} ({selectedBooking.reservation?.guestCount} Guests)</span>
-                </div>
-              </div>
-
-              {selectedBooking.reservation?.specialRequests && (
-                <div className="p-3 bg-purple-950/40 border border-purple-500/30 rounded-sm">
-                  <span className="text-purple-300 font-bold uppercase text-[10px] block mb-1">
-                    Customer Special Request:
-                  </span>
-                  <p className="text-purple-200 italic">"{selectedBooking.reservation?.specialRequests}"</p>
-                </div>
-              )}
-
-              {selectedBooking.preOrder?.hasPreOrder && (
-                <div className="p-3 bg-background-darker rounded-sm border border-white/5">
-                  <span className="text-[10px] uppercase text-muted block mb-1 font-bold">
-                    Pre-Ordered Food Items (₹{selectedBooking.preOrder.totalBill}):
-                  </span>
-                  <ul className="space-y-1 text-cream-300">
-                    {selectedBooking.preOrder.items?.map((item, idx) => (
-                      <li key={idx} className="flex justify-between">
-                        <span>{item.quantity}x {item.name} ({item.variant})</span>
-                        <span>₹{item.itemTotal}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Admin Internal Staff Note */}
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-muted mb-1">
-                  Staff / Admin Internal Notes:
-                </label>
-                <textarea
-                  rows={2}
-                  defaultValue={selectedBooking.adminNotes || ""}
-                  onChange={(e) => setEditNotes(e.target.value)}
-                  placeholder="Add notes for staff (e.g. Birthday cake kept in fridge, table decorated)..."
-                  className="w-full bg-background-darker border border-white/15 text-cream-100 p-2.5 rounded-sm outline-none text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={() => handleAdminStatusAction(selectedBooking.id || selectedBooking.bookingId, selectedBooking.status, editNotes)}
-                  className="mt-1 px-3 py-1 bg-white/10 hover:bg-white/20 text-cream-200 text-[10px] uppercase font-bold rounded-xs"
-                >
-                  Save Internal Note
-                </button>
-              </div>
-
-              {/* Authority Reassign Table */}
-              <div>
-                <label className="block text-[10px] uppercase font-bold text-muted mb-1">
-                  Reassign Seating Zone:
-                </label>
-                <div className="flex gap-2">
-                  <select
-                    defaultValue={selectedBooking.reservation?.areaId}
-                    onChange={(e) => handleReassignArea(selectedBooking.id || selectedBooking.bookingId, e.target.value)}
-                    className="flex-1 bg-background-darker border border-white/15 text-cream-100 p-2 rounded-sm outline-none text-xs"
-                  >
-                    {SEATING_AREAS.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({a.floor})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+            <div className="flex items-center justify-between">
+              <StatusBadge status={selectedBooking.status || "pending"} />
+              <span className="text-[11px] text-muted">
+                Created {selectedBooking.createdAt ? new Date(selectedBooking.createdAt).toLocaleString("en-IN") : "—"}
+              </span>
             </div>
 
-            <div className="pt-3 border-t border-white/10 flex items-center justify-between">
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3 p-3 bg-background-darker rounded-sm border border-white/5">
+                <div>
+                  <span className="text-muted block text-[10px] uppercase">Date & Time (IST)</span>
+                  <span className="text-cream-100 font-semibold">
+                    {selectedBooking.date || selectedBooking.reservation?.date} at{" "}
+                    {selectedBooking.timeSlot || selectedBooking.reservation?.timeSlot}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted block text-[10px] uppercase">Seating Zone</span>
+                  <span className="text-coffee-300 font-semibold">
+                    {selectedBooking.zoneName || selectedBooking.reservation?.areaName} ({selectedBooking.partySize || selectedBooking.reservation?.guestCount} Guests)
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-background-darker rounded-sm border border-white/5 space-y-1.5">
+                <span className="text-muted block text-[10px] uppercase font-bold">Customer Contact</span>
+                <div className="flex justify-between">
+                  <span className="text-muted">Name:</span>
+                  <span className="text-cream-100 font-medium">{selectedBooking.name || selectedBooking.customer?.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted">Phone:</span>
+                  <span className="text-cream-100 font-mono">{selectedBooking.phone || selectedBooking.customer?.phone}</span>
+                </div>
+              </div>
+
+              {(selectedBooking.specialRequests || selectedBooking.reservation?.specialRequests) && (
+                <div className="p-3 bg-background-darker rounded-sm border border-white/5 space-y-1">
+                  <span className="text-muted block text-[10px] uppercase font-bold">Special Requests</span>
+                  <p className="text-cream-200 italic">
+                    "{selectedBooking.specialRequests || selectedBooking.reservation?.specialRequests}"
+                  </p>
+                </div>
+              )}
+
+              {selectedBooking.cancellationReason && (
+                <div className="p-3 bg-red-950/30 rounded-sm border border-red-500/30 space-y-1">
+                  <span className="text-red-400 block text-[10px] uppercase font-bold">Cancellation Reason</span>
+                  <p className="text-red-200">{selectedBooking.cancellationReason}</p>
+                </div>
+              )}
+
+              {selectedBooking.rejectionReason && (
+                <div className="p-3 bg-red-950/30 rounded-sm border border-red-500/30 space-y-1">
+                  <span className="text-red-400 block text-[10px] uppercase font-bold">Rejection Reason</span>
+                  <p className="text-red-200">{selectedBooking.rejectionReason}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-white/10">
               <button
                 type="button"
                 onClick={() => printEmailReceipt(selectedBooking)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-coffee-400 text-background-darker font-bold text-xs uppercase tracking-wider rounded-sm shadow-sm"
+                className="px-4 py-2 bg-white/10 hover:bg-white/15 text-cream-100 text-xs font-bold uppercase tracking-wider rounded-sm transition-colors flex items-center gap-1.5"
               >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print Official Receipt</span>
+                <Printer className="w-3.5 h-3.5 text-coffee-400" />
+                <span>Print Pass</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCancelModalBooking(selectedBooking);
+                  const st = (selectedBooking.status || "").toLowerCase();
+                  setCancelReason(
+                    st === "cancelled" || st === "rejected"
+                      ? "Re-cancelled by Cafe Admin"
+                      : "Customer requested cancellation"
+                  );
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-bold uppercase tracking-wider rounded-sm transition-colors inline-flex items-center gap-1.5"
+              >
+                <Ban className="w-3.5 h-3.5" />
+                <span>Cancel Booking</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setSelectedBooking(null)}
-                className="px-4 py-2 bg-white/10 hover:bg-white/15 text-cream-100 text-xs uppercase tracking-wider rounded-sm font-semibold"
+                className="px-4 py-2 bg-coffee-400 hover:bg-coffee-500 text-background-darker text-xs font-bold uppercase tracking-wider rounded-sm transition-colors"
               >
-                Close Inspector
+                Close
               </button>
             </div>
-
           </div>
         </div>
       )}
 
+      {/* CANCEL MODAL */}
+      {cancelModalBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in font-sans">
+          <div className="relative w-full max-w-md bg-background-card border border-red-500/40 rounded-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-red-400">
+              <Ban className="w-6 h-6 shrink-0" />
+              <h3 className="font-serif text-lg uppercase tracking-wide text-cream-100">
+                Cancel Reservation #{cancelModalBooking.bookingId || cancelModalBooking.id}?
+              </h3>
+            </div>
+
+            <p className="text-xs text-muted-light leading-relaxed">
+              Cancelling this reservation will free up the table unit for other guests.
+            </p>
+
+            <div className="space-y-1.5 text-xs">
+              <label className="block text-muted uppercase font-semibold text-[10px] tracking-wider">
+                Reason for Cancellation
+              </label>
+              <input
+                type="text"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="e.g. Schedule conflict, customer requested..."
+                className="w-full bg-background-darker border border-white/15 focus:border-red-400 text-cream-100 px-3.5 py-2.5 rounded-sm outline-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setCancelModalBooking(null)}
+                disabled={isCancelling}
+                className="px-4 py-2 text-xs font-semibold text-muted hover:text-cream-100 uppercase tracking-wider"
+              >
+                Dismiss
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={isCancelling}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold uppercase tracking-wider rounded-sm transition-colors shadow-lg"
+              >
+                {isCancelling ? "Cancelling..." : "Confirm Cancellation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

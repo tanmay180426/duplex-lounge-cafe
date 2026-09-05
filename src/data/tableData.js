@@ -6,6 +6,7 @@ export const SEATING_AREAS = [
     floor: "Level 2 (Upstairs)",
     minGuests: 2,
     maxGuests: 12,
+    units: 1, // Number of physical units of this zone
     image: "/assets/duplex-mezzanine-stairs.jpg",
     features: [
       "Fairy-lit spiral staircase access",
@@ -22,6 +23,7 @@ export const SEATING_AREAS = [
     floor: "Ground Floor",
     minGuests: 1,
     maxGuests: 6,
+    units: 1, // Number of physical units of this zone
     image: "/assets/duplex-neon-booth.jpg",
     features: [
       "Signature amber neon lighting backdrop",
@@ -38,6 +40,7 @@ export const SEATING_AREAS = [
     floor: "Ground Floor",
     minGuests: 1,
     maxGuests: 4,
+    units: 4, // Number of physical units of this zone (configurable)
     image: null,
     features: [
       "Quick access to barista & counter",
@@ -53,6 +56,7 @@ export const SEATING_AREAS = [
     floor: "Ground Floor",
     minGuests: 1,
     maxGuests: 2,
+    units: 1, // Number of physical units of this zone
     image: null,
     features: [
       "Quiet corner table with street view",

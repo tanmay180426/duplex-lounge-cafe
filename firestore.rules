@@ -1,43 +1,117 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper: checks if user is authenticated admin
-    function isAdmin() {
+
+    function isAuthenticated() {
       return request.auth != null;
     }
 
-    // Bookings collection
-    match /bookings/{bookingId} {
-      // Allow customers to submit new bookings with validated data
-      allow create: if true;
-      // Allow customers to read single booking or query their own bookings
-      allow get, list: if true;
-      // Allow updating booking status or cancellation
-      allow update, delete: if true;
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.token.email))
+      );
     }
 
-    // Payments collection
-    match /payments/{paymentId} {
-      allow create, get, list: if true;
+    // 📅 Bookings Collection
+    // Customers (no login required) can CREATE a CONFIRMED booking directly
+    // when the requested slot has free capacity (validated transactionally in
+    // the client). Server-validated required fields below.
+    // Only admins can update or delete bookings.
+    match /bookings/{bookingId} {
+      allow read: if isAdmin();
+
+      allow create: if
+        request.resource.data.keys().hasAll(['name','phone','date','timeSlot','zoneId','partySize','status']) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() < 80 &&
+        request.resource.data.phone is string &&
+        request.resource.data.phone.size() >= 10 &&
+        request.resource.data.phone.size() < 20 &&
+        request.resource.data.date is string &&
+        request.resource.data.timeSlot is string &&
+        request.resource.data.zoneId is string &&
+        request.resource.data.partySize is number &&
+        request.resource.data.partySize > 0 &&
+        request.resource.data.partySize <= 30 &&
+        // New bookings are created CONFIRMED (auto-book when seats available)
+        (request.resource.data.status == 'CONFIRMED' || request.resource.data.status == 'confirmed');
+
       allow update, delete: if isAdmin();
     }
 
-    // Users profile collection
-    match /users/{userId} {
-      allow read, write: if true;
+    // 🛡️ Admins Registry Collection
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false;
     }
 
-    // Gallery images collection
+    // 🔔 Admin notifications queue (written by Cloud Functions, read by admins)
+    match /admin_notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // 🪑 Table Types / Seating Zones Inventory Collection
+    match /tableTypes/{typeId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 🖼️ Gallery Images Collection
     match /gallery_images/{imageId} {
       allow read: if true;
-      allow create, update, delete: if true;
+      allow write: if isAdmin();
     }
 
-    // Restaurant metadata / settings
+    // ⚙️ Settings / Metadata Collection
     match /settings/{settingId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // 🍽️ Menu Items Collection (admin-managed)
+    match /menu_items/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 🕒 Business hours (admin-managed)
+    match /business_hours/{hourId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // 📝 Customer booking sessions (audit log of every attempt)
+    // Anonymous customers may CREATE; only admins can read.
+    match /customer_sessions/{sessionId} {
+      allow read: if isAdmin();
+      allow create: if
+        request.resource.data.keys().hasAll(['outcome','timestamp']) &&
+        request.resource.data.outcome is string &&
+        (request.resource.data.outcome == 'success' ||
+         request.resource.data.outcome == 'validation_failed' ||
+         request.resource.data.outcome == 'fully_booked' ||
+         request.resource.data.outcome == 'error') &&
+        // Soft size limits to avoid storage abuse
+        request.resource.data.name.size() < 100 &&
+        request.resource.data.phone.size() < 25;
+      allow update, delete: if isAdmin();
+    }
+
+    // 🔐 Admin login audit log
+    // Only the authService (with authenticated user, even if not admin)
+    // can CREATE; only admins can read.
+    match /admin_login_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() &&
+        request.resource.data.keys().hasAll(['email','success','timestamp']) &&
+        request.resource.data.email is string &&
+        request.resource.data.email.size() < 200 &&
+        request.resource.data.success is bool;
+      allow update, delete: if isAdmin();
     }
   }
 }

@@ -43,7 +43,7 @@ export default function LocationPage({ onOpenBooking }) {
                 </h3>
                 <p className="text-xs text-cream-200 mt-1 leading-relaxed">
                   Shop No. 2, Sai Suman Building, Next to Tisai Gate,<br />
-                  Tisgao Naka, Kalyan (West), Maharashtra 421306
+                  Tisgao Naka, Kalyan (East), Maharashtra 421306
                 </p>
               </div>
             </div>

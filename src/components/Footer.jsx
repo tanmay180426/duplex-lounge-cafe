@@ -34,7 +34,7 @@ export default function Footer({ onNavigate, onOpenAdmin, onOpenBooking }) {
                   DU<span className="text-coffee-400">P</span>LEX
                 </span>
                 <span className="text-[10px] tracking-[0.3em] text-muted uppercase font-sans font-medium">
-                  Lounge Cafe • Kalyan (West)
+                  Lounge Cafe • Kalyan (East)
                 </span>
               </button>
               

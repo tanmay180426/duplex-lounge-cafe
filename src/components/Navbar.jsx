@@ -2,34 +2,22 @@ import React, { useState, useEffect } from "react";
 import {
   Menu,
   X,
-  Phone,
-  MapPin,
-  Clock,
   ArrowRight,
   Calendar,
-  Lock,
-  User,
-  LogOut,
-  ChevronDown,
-  Sparkles
+  Lock
 } from "lucide-react";
 import { InstagramIcon } from "./Icons";
 import { CAFE_INFO } from "../data/cafeInfo";
 import { getCafeStatus } from "../utils/hoursHelper";
-import { signOutUser } from "../services/authService";
 
 export default function Navbar({
   currentPage = "home",
   onNavigate,
   onOpenBooking,
-  onOpenAdmin,
-  onOpenCustomerAuth,
-  onOpenCustomerPortal,
-  currentUser
+  onOpenAdmin
 }) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [status, setStatus] = useState(getCafeStatus());
 
   useEffect(() => {
@@ -72,8 +60,6 @@ export default function Navbar({
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-          
-          {/* Brand Logo with DLC Crest */}
           <button
             type="button"
             onClick={() => handlePageClick("home")}
@@ -100,7 +86,6 @@ export default function Navbar({
             </div>
           </button>
 
-          {/* Desktop Multi-Page Navigation Tabs */}
           <nav className="hidden lg:flex items-center gap-1 xl:gap-2">
             {navPages.map((page) => {
               const isActive = currentPage === page.id;
@@ -120,7 +105,6 @@ export default function Navbar({
               );
             })}
 
-            {/* Direct Instagram Link */}
             <a
               href={CAFE_INFO.contact.instagram}
               target="_blank"
@@ -132,10 +116,7 @@ export default function Navbar({
             </a>
           </nav>
 
-          {/* Right Action / Customer Auth / Booking CTA */}
           <div className="hidden md:flex items-center gap-3">
-            
-            {/* Live Open Indicator */}
             <div
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
                 status.isOpen
@@ -153,71 +134,6 @@ export default function Navbar({
               </span>
             </div>
 
-            {/* Customer User Account Dropdown / Login Button */}
-            {currentUser ? (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-sm bg-background-darker border border-white/15 hover:border-coffee-400 text-cream-100 text-xs transition-colors"
-                >
-                  <div className="w-5 h-5 rounded-full bg-coffee-500/20 text-coffee-300 flex items-center justify-center font-bold text-[10px]">
-                    {currentUser.name ? currentUser.name.charAt(0).toUpperCase() : "U"}
-                  </div>
-                  <span className="max-w-[80px] truncate font-medium">
-                    {currentUser.name || "My Account"}
-                  </span>
-                  <ChevronDown className="w-3 h-3 text-muted" />
-                </button>
-
-                {userDropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-48 bg-[#141211] border border-white/15 rounded-sm shadow-2xl py-1 z-50 animate-fade-in font-sans">
-                    <div className="px-3 py-2 border-b border-white/10 text-xs">
-                      <span className="font-semibold text-cream-100 block truncate">
-                        {currentUser.name}
-                      </span>
-                      <span className="text-[10px] text-muted block truncate">
-                        {currentUser.email}
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        onOpenCustomerPortal();
-                      }}
-                      className="w-full text-left px-3 py-2 text-xs text-cream-200 hover:bg-white/5 hover:text-coffee-300 flex items-center gap-2"
-                    >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>My Bookings</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUserDropdownOpen(false);
-                        signOutUser();
-                      }}
-                      className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-white/5 flex items-center gap-2"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Sign Out</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => onOpenCustomerAuth("signin")}
-                className="px-3 py-1.5 rounded-sm text-xs font-semibold uppercase tracking-wider text-cream-200 hover:text-coffee-300 hover:bg-white/5 transition-colors"
-              >
-                Sign In
-              </button>
-            )}
-
-            {/* Quick Book CTA Button */}
             <button
               type="button"
               onClick={() => onOpenBooking(null)}
@@ -227,18 +143,17 @@ export default function Navbar({
               <span>Book Table</span>
             </button>
 
-            {/* Admin Portal Direct Trigger */}
             <button
               type="button"
               onClick={onOpenAdmin}
               title="Admin Portal"
+              aria-label="Admin Portal"
               className="p-2 rounded-sm text-muted hover:text-coffee-300 hover:bg-white/5 transition-colors"
             >
               <Lock className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Mobile Menu Toggle Button */}
           <div className="flex items-center gap-2 lg:hidden">
             <button
               type="button"
@@ -257,11 +172,9 @@ export default function Navbar({
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
           </div>
-
         </div>
       </header>
 
-      {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden animate-fade-in bg-black/95 backdrop-blur-xl flex flex-col justify-between p-6">
           <div className="flex items-center justify-between border-b border-white/10 pb-4">
@@ -297,7 +210,6 @@ export default function Navbar({
               </button>
             ))}
 
-            {/* Instagram Link in Mobile Menu */}
             <a
               href={CAFE_INFO.contact.instagram}
               target="_blank"
@@ -313,30 +225,6 @@ export default function Navbar({
           </div>
 
           <div className="space-y-3 pt-4 border-t border-white/10">
-            {currentUser ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenCustomerPortal();
-                }}
-                className="w-full py-3 bg-white/10 text-cream-100 rounded-sm text-xs font-bold uppercase tracking-wider text-center"
-              >
-                My Account ({currentUser.name})
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onOpenCustomerAuth("signin");
-                }}
-                className="w-full py-3 bg-white/10 text-cream-100 rounded-sm text-xs font-bold uppercase tracking-wider text-center"
-              >
-                Sign In / Sign Up
-              </button>
-            )}
-
             <button
               type="button"
               onClick={() => {

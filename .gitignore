@@ -27,3 +27,8 @@ dist-ssr
 .env
 .env.local
 .env.production
+
+.agents/
+.claude/
+.kilo/
+skills-lock.json
